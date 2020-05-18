@@ -1,2 +1,1 @@
-# Easy_CRNN
-emmmmm
+emmm，写个屁，都让你白嫖一条龙了，还要送肾宝吗？
