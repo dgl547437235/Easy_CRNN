@@ -178,6 +178,6 @@ for epoch in range(10000):
 		#traced_script_module = torch.jit.trace(model, example)
 		#traced_script_module.save("CrnnOut.pt")
 
-		dummy_input = torch.randn(1, 3, 64,512, device='cuda') #定义输入的数据类型(B,C,H,W)为(10,3,224,224)
+		dummy_input = torch.randn(1, 3, 64,512, device='cuda') 
 		output_names = [ "output" ]
 		torch.onnx._export(model, dummy_input,"crnn.onnx",export_params=True)
