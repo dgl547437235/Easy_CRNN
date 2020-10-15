@@ -31,7 +31,7 @@ int main()
 
 	//time0 = cv::getTickCount();
 	int* max = new int[32];
-	double maxVal = 0; //最大值一定要赋初值，否则运行时会报错
+	double maxVal = 0; //鏈�澶у�间竴瀹氳璧嬪垵鍊硷紝鍚﹀垯杩愯鏃朵細鎶ラ敊
 	Point maxLoc;
 	vector<int> vi;
 	for (int i = 0; i < 32; i++)
