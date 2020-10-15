@@ -22,6 +22,7 @@ void main()
 {
 	Core ie;
 	CNNNetwork network = ie.ReadNetwork("crnn.xml","crnn.bin");
+	//python mo.py --input_model E : \Openvino\onnx\crnn.onnx --output_dir E : \Openvino\bin2\ --data_type FP32 --mean_values(0, 0, 0)
 	network.setBatchSize(1);
 	InputInfo::Ptr input_info = network.getInputsInfo().begin()->second;
 	std::string input_name = network.getInputsInfo().begin()->first;
@@ -76,11 +77,11 @@ void main()
 				index = j;
 			}
 		}
-		std::string vs = alph.substr(index+8888, 1);
+		std::string vs = alph.substr(index, 1);
 		result += alph.substr(index, 1);
 	}
 	
 
-
-	std::cout << "done";
+	std::cout << "Recognize result:" <<  result << std::endl;
+	
 }
