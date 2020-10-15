@@ -3,167 +3,96 @@ import torch.nn.functional as F
 import torch
 import torch.nn as nn
 import numpy as np
-class ResidualBlock(nn.Module):
-	def __init__(self,i_channel,o_channel,stride=1,downsample=None):
-		super().__init__()
-		self.conv1=nn.Conv2d(i_channel,o_channel,3,stride,1)
-		self.bn1=nn.BatchNorm2d(o_channel)
-		self.relu1=nn.ReLU(True)
+class Block(nn.Module):
+    '''expand + depthwise + pointwise'''
+    def __init__(self, in_planes, out_planes, expansion, stride):
+        super(Block, self).__init__()
+        self.stride = stride
+        planes = expansion * in_planes
+        self.conv1 = nn.Conv2d(in_planes, planes, kernel_size=1,stride=1, padding=0, bias=False)
+        self.bn1 = nn.BatchNorm2d(planes)
+        self.conv2 = nn.Conv2d(planes, planes, kernel_size=3,stride=stride, padding=1, groups=planes,bias=False)
+        self.bn2 = nn.BatchNorm2d(planes)
+        self.conv3 = nn.Conv2d(planes, out_planes, kernel_size=1,stride=1, padding=0, bias=False)
+        self.bn3 = nn.BatchNorm2d(out_planes)
 
-		self.conv2=nn.Conv2d(in_channels=o_channel,out_channels=o_channel,kernel_size=3,stride=1,padding=1,bias=False)        
-		self.bn2=nn.BatchNorm2d(o_channel)        
-		self.downsample=downsample
-	def forward(self,x):        
-		residual=x                
-			
-		out=self.conv1(x)        
-		out=self.bn1(out)        
-		out=self.relu1(out)        
-		out=self.conv2(out)        
-		out=self.bn2(out)                
-			
-		if self.downsample:            
-			residual=self.downsample(x)                
-		out+=residual        
-		out=self.relu1(out)                
-		return out
+        self.shortcut = nn.Sequential()
+        if stride == 1 and in_planes != out_planes:
+            self.shortcut = nn.Sequential(
+                nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=1, padding=0, bias=False),
+                nn.BatchNorm2d(out_planes),
+            )
 
+    def forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = F.relu(self.bn2(self.conv2(out)))
+        out = self.bn3(self.conv3(out))
+        out = out + self.shortcut(x) if self.stride==1 else out
+        return out
+class DownH(nn.Module):
+    def __init__(self, in_planes, out_planes):
+    	super(DownH, self).__init__()
+    	self.Conv=nn.Sequential(nn.Conv2d(in_planes,out_planes,3,1,1),
+    	nn.MaxPool2d((2,1),(2,1)),
+		nn.BatchNorm2d(out_planes),
+    	nn.ReLU(True))
+    def forward(self,x):
+    	out=self.Conv(x)
+    	
+    	return out
 
 class NetCrnn(nn.Module):
-    def __init__(self, num_class=64,batchSize=10,useCuda=True):
+    def __init__(self, num_class=64,batchSize=10,useCuda=True,w=512,h=64,c=3):
         super(NetCrnn, self).__init__()
         self.num_class = num_class
         self.batch=batchSize
         self.useCuda=useCuda
-        self.conv1 = nn.Sequential(
-                nn.Conv2d(3, 16, 5, padding=(2, 2),stride=(1,1)),#第1个
-                nn.MaxPool2d(2, 2),
-                nn.ReLU())
-        self.conv2=ResidualBlock(16,32,1,self.downSample(16,32,1))
-        self.conv3=nn.Sequential(
-			nn.Conv2d(32,32,3,1,1),
-			nn.BatchNorm2d(32),
-			nn.MaxPool2d((2,1), (2,1)),		   
-			nn.ReLU())
-        self.conv4=ResidualBlock(32,32,2,self.downSample(32,32,2))
-        self.conv5=nn.Sequential(
-			nn.Conv2d(32,32,3,1,1),
-			nn.BatchNorm2d(32),
-			nn.MaxPool2d((2,1), (2,1)),
-			nn.ReLU())
-        self.conv6=ResidualBlock(32,64,1,self.downSample(32,64,1))
-        self.conv7=nn.Sequential(
-			nn.Conv2d(64,64,3,1,1),
-			nn.BatchNorm2d(64),
-			nn.MaxPool2d((2,2), (2,2)),
-			nn.ReLU())
-        self.conv8=ResidualBlock(64,128,2,self.downSample(64,128,2))
+        main=nn.Sequential()
+        main.add_module("Conv",nn.Conv2d(3,16,5,2,2))
+        w,h=int(w/2),int(h/2)
+        multi=(int)(w/h)
+        c=16
+        
+        while(int(h/2)>1 and int(w/2)>32):
+        	main.add_module('conv-{0}-{1}'.format(c, c*2),Block(c,c*2,3,2))
+        	w,h=int(w/2),int(h/2)
+        	c=c*2
+        	main.add_module('conv-{0}-{1}'.format(c, c),DownH(c,c))
+        	main.add_module('pool-{0}-{1}'.format(c, c),nn.Conv2d(c,c*2,1,1))
+        	c=c*2
+        	h=int(h/2)
+        
+        main.add_module('conv-{0}-{1}'.format(c, c*2),Block(c,c*2,4,2))
+        c=c*2
+        self.main=main
+        self.c=c
+ 
         self.num_layers=5 
-        self.gru = nn.GRU(128, 128, self.num_layers, batch_first=True, bidirectional=True)
-        self.Lstm=nn.LSTM(128,128,2,True,True,bidirectional=True)
-        self.fc=nn.Linear(256,self.num_class)
-        self.hid=self.init_hidden(self.batch)
-    def downSample(self,i_channel,o_channel,stride=1):
-             conv=nn.Sequential(
-				nn.Conv2d(i_channel,o_channel,3,stride,1),
-				nn.BatchNorm2d(o_channel),
-				nn.ReLU())
-             return conv   
+        self.Lstm=nn.LSTM(c,c,2,True,True,bidirectional=True)
+        self.fc=nn.Linear(self.c*2,self.num_class)
+        self.hid=self.init_hidden(self.batch,c*2)
 
-    def init_hidden(self, batch_size):
-        h0 = Variable(torch.zeros(self.num_layers * 2, batch_size, 128))
+
+    def init_hidden(self, batch_size,c):
+        h0 = Variable(torch.zeros(self.num_layers * 2, batch_size, c))
         if(self.useCuda):
         	return h0.cuda()
         else:
         	return h0.cpu()
 
     def forward(self, x):
-        conv1=self.conv1(x)
-        conv2=self.conv2(conv1)
-        conv3=self.conv3(conv2)
-        conv4=self.conv4(conv3)
-        conv5=self.conv5(conv4)
-        conv6=self.conv6(conv5)
-        conv7=self.conv7(conv6)
-        conv8=self.conv8(conv7)
-        Gru=conv8.squeeze(2)
-        Gru=Gru.transpose(1,2)
-        out,hid = self.Lstm(Gru)
-        out=out.reshape(-1,256)
+        Feature=self.main(x)
+        Feature=Feature.squeeze(2)
+        Feature=Feature.transpose(1,2)
+        out,hid = self.Lstm(Feature)
+        out=out.reshape(-1,self.c*2)
         fc=self.fc(out)
         return fc
-
-class NetCrnnOut(nn.Module):
-    def __init__(self, num_class=64,batchSize=10,useCuda=True):
-        super(NetCrnnOut, self).__init__()
-        self.num_class = num_class
-        self.batch=batchSize
-        self.useCuda=useCuda
-        self.conv1 = nn.Sequential(
-                nn.Conv2d(3, 16, 5, padding=(2, 2),stride=(1,1)),#第1个
-                nn.MaxPool2d(2, 2),
-                nn.ReLU())
-        self.conv2=ResidualBlock(16,32,1,self.downSample(16,32,1))
-        self.conv3=nn.Sequential(
-			nn.Conv2d(32,32,3,1,1),
-			nn.BatchNorm2d(32),
-			nn.MaxPool2d((2,1), (2,1)),		   
-			nn.ReLU())
-        self.conv4=ResidualBlock(32,32,2,self.downSample(32,32,2))
-        self.conv5=nn.Sequential(
-			nn.Conv2d(32,32,3,1,1),
-			nn.BatchNorm2d(32),
-			nn.MaxPool2d((2,1), (2,1)),
-			nn.ReLU())
-        self.conv6=ResidualBlock(32,64,1,self.downSample(32,64,1))
-        self.conv7=nn.Sequential(
-			nn.Conv2d(64,64,3,1,1),
-			nn.BatchNorm2d(64),
-			nn.MaxPool2d((2,2), (2,2)),
-			nn.ReLU())
-        self.conv8=ResidualBlock(64,128,2,self.downSample(64,128,2))
-        self.num_layers=5 
-        self.gru = nn.GRU(128, 128, self.num_layers, batch_first=True, bidirectional=True)
-        self.Lstm=nn.LSTM(128,128,2,True,True,bidirectional=True)
-        self.fc=nn.Linear(256,self.num_class)
-        self.hid=self.init_hidden(self.batch)
-    def downSample(self,i_channel,o_channel,stride=1):
-             conv=nn.Sequential(
-				nn.Conv2d(i_channel,o_channel,3,stride,1),
-				nn.BatchNorm2d(o_channel),
-				nn.ReLU())
-             return conv   
-
-    def init_hidden(self, batch_size):
-        h0 = Variable(torch.zeros(self.num_layers * 2, batch_size, 128))
-        if(self.useCuda):
-        	return h0.cuda()
-        else:
-        	return h0.cpu()
-
-    def forward(self, x):
-        conv1=self.conv1(x)
-        conv2=self.conv2(conv1)
-        conv3=self.conv3(conv2)
-        conv4=self.conv4(conv3)
-        conv5=self.conv5(conv4)
-        conv6=self.conv6(conv5)
-        conv7=self.conv7(conv6)
-        conv8=self.conv8(conv7)
-        Gru=conv8.squeeze(2)
-        Gru=Gru.transpose(1,2)
-        out,hid = self.Lstm(Gru)
-        out=out.reshape(-1,256)
-        fc=self.fc(out)
-        fc=torch.argmax(fc,dim=1)
-        return fc
-
-
 
 
 #alph="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,"
 #c=len(alph)
-net=NetCrnnOut(64,1,False).cuda()
+net=NetCrnn(64,1,False).cuda()
 net=net.cuda()
 x=torch.randn(1,3,64,512,device='cuda')#[03457]
 #label=torch.from_numpy(np.array([[0,3,4,5,7,7,9,3,1]])).cuda()
