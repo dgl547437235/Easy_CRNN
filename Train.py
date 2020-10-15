@@ -10,39 +10,7 @@ import Model
 from torchvision import datasets, transforms
 import torch.nn as nn
 from torch.autograd import Variable
-def GetData(labelText,StartIndex):
-	imgPath=labelText.split("--")[0]
-	label=labelText.split("--")[1]
-	img=cv.imread(imgPath)
-	hsv=cv.cvtColor(img,cv.COLOR_BGR2HSV)
-	h,s,v=cv.split(hsv)
-	_,binary=cv.threshold(v,0,255,cv.THRESH_OTSU)
-	hist = cv.calcHist([binary],[0],None,[256],[0,255])
-	if(hist[0][0]<(binary.shape[0]*binary.shape[1]/2)):
-		binary=cv.bitwise_not(binary)
 
-	XMap=np.zeros(binary.shape[1])
-	for i in range(binary.shape[1]):
-		for j in range(binary.shape[0]):
-			if(binary[j][i]==0):
-				XMap[i]=XMap[i]+1
-	loc=[]
-	IsBegin=False
-	start=0
-	for i in range(0,XMap.shape[0]-1):
-		if(XMap[i+1]<binary.shape[0] and XMap[i+1]<XMap[i] and IsBegin==False):#进入
-			IsBegin=True
-			start=i
-		elif(XMap[i+1]>XMap[i] and XMap[i+1]==binary.shape[0] and IsBegin==True):#出去
-			IsBegin=False
-			loc.append([start,i])
-	Imgs=[]
-	for i in range(len(loc)):
-		a=loc[i][0]
-		b=loc[i][1]
-		roi=binary[0:binary.shape[0],a:b]
-		Imgs.append(roi)
-	
 	
 def img_loader(img_path):
     img = cv.imread(img_path)
@@ -89,17 +57,19 @@ class CaptchaData(Dataset):
         
         Tl=len(label)
         #l=np.array((10))
+        labelStr=""
         target=[0]*32
         for i in range(len(label)):
             target[i]=label[i]
+            labelStr+=self.alph[label[i]:label[i]+1]
         for i in range(len(label),32):
             target[i]=-1
         y_int = torch.LongTensor(target)
         #labelStr=imgPath.split("//")[-1].split(".")[0]
+        
+        return img,y_int,Tl,labelStr
 
-        return img,y_int,Tl,label
-
-b=100
+b=200
 net=Model.NetCrnn(64,b).cuda()
 ctc_loss = nn.CTCLoss(blank=63, reduction='mean')
 alph = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,"
@@ -107,10 +77,8 @@ DataSet=CaptchaData(".//label.txt",alph)
 dataload=DataLoader(DataSet,b,transforms.Compose([transforms.ToTensor()]),drop_last=True)
 optimizer = torch.optim.Adam(net.parameters(), lr=5e-4)#定义优化器
 input_length=torch.from_numpy(np.array([32]*b)).cuda()
-net.load_state_dict(torch.load("crnn.pt"))
+#net.load_state_dict(torch.load("crnn.pt"))
 for epoch in range(10000):
-	
-
 
 	net.train()
 	for img,label,target_length,_ in dataload:
